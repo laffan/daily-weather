@@ -105,6 +105,13 @@ You need macOS, Xcode, [XcodeGen](https://github.com/yonaskolb/XcodeGen)
 4. **Add widgets**: long-press the home screen or lock screen, tap **+**, and
    search for "Daily Weather".
 
+Use the `npm run ios:*` scripts rather than `npm run tauri ios …` directly.
+Tauri only writes your development team into the app target, so these scripts
+first run `scripts/ios-widget-team.mjs`, which copies the team onto the widget
+target. Without it, Xcode fails with *Signing for "DailyWeatherWidget" requires a
+development team*. You can also run it on its own with `npm run ios:team`, for
+example before building from Xcode.
+
 `src-tauri/gen/` is generated and git-ignored. If you change the identifier,
 the team, or `src-tauri/ios/project.yml`, delete `src-tauri/gen/apple` and run
 `npm run ios:init` again.

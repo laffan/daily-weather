@@ -9,9 +9,10 @@
     "preview": "vite preview",
     "typecheck": "tsc --noEmit",
     "tauri": "tauri",
-    "ios:init": "tauri ios init && tauri icon assets/app-icon.png",
-    "ios:dev": "tauri ios dev",
-    "ios:build": "tauri ios build"
+    "ios:init": "tauri ios init && tauri icon assets/app-icon.png && node scripts/ios-widget-team.mjs",
+    "ios:dev": "node scripts/ios-widget-team.mjs && tauri ios dev",
+    "ios:build": "node scripts/ios-widget-team.mjs && tauri ios build",
+    "ios:team": "node scripts/ios-widget-team.mjs"
   },
   "dependencies": {
     "@tauri-apps/api": "^2.12.0",
