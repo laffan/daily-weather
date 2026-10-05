@@ -2,12 +2,19 @@ import Foundation
 
 // MARK: - Shared data model (mirrors src/types.ts)
 
+struct TideStation: Codable, Hashable {
+    let id: String
+    let name: String
+}
+
 struct SavedLocation: Codable, Hashable {
     let id: String
     let name: String
     let detail: String
     let lat: Double
     let lon: Double
+    /// Nearest NOAA tide station, looked up by the app (nil = none or not yet known).
+    let tideStation: TideStation?
 }
 
 struct Tide: Codable {
@@ -29,11 +36,20 @@ struct Forecast: Codable {
         let max: [Double?]
         let min: [Double?]
     }
+    struct Swell: Codable {
+        let time: [Double]
+        let height: [Double?]
+        let period: [Double?]
+        let source: String
+    }
     let fetchedAt: Double
     let tz: String
     let hourly: Hourly
     let daily: Daily
     let tides: [Tide]?
+    let tideDatum: String?
+    let tideSource: String?
+    let swell: Swell?
 
     var fetchedDate: Date { Date(timeIntervalSince1970: fetchedAt) }
     var timeZone: TimeZone { TimeZone(identifier: tz) ?? .current }
@@ -90,11 +106,12 @@ enum SharedStore {
     }
 }
 
-// MARK: - Open-Meteo (Swift port of src/api.ts)
+// MARK: - Fetching (Swift port of src/api.ts)
 
 enum WeatherAPI {
     private static let forecastDays = 7
     private static let coastMaxKm = 25.0
+    private static let swellMaxKm = 50.0
     private static let minTidalRange = 0.1
 
     private struct OMForecast: Decodable {
@@ -118,18 +135,28 @@ enum WeatherAPI {
     private struct OMMarine: Decodable {
         struct H: Decodable {
             let time: [Double]
-            let sea_level_height_msl: [Double?]
+            let sea_level_height_msl: [Double?]?
+            let swell_wave_height: [Double?]?
+            let swell_wave_period: [Double?]?
         }
         let latitude: Double
         let longitude: Double
         let hourly: H?
     }
 
+    private struct NOAAPredictions: Decodable {
+        struct P: Decodable {
+            let t: String
+            let v: String
+            let type: String
+        }
+        let predictions: [P]?
+    }
+
     private static func get<T: Decodable>(_ type: T.Type, _ base: String, _ query: [String: String]) async throws -> T {
         var comps = URLComponents(string: base)!
         comps.queryItems = query.map { URLQueryItem(name: $0.key, value: $0.value) }
-        var request = URLRequest(url: comps.url!, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: 12)
-        request.allowsExpensiveNetworkAccess = true
+        let request = URLRequest(url: comps.url!, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: 12)
         let (data, response) = try await URLSession.shared.data(for: request)
         guard (response as? HTTPURLResponse)?.statusCode == 200 else { throw URLError(.badServerResponse) }
         return try JSONDecoder().decode(type, from: data)
@@ -143,29 +170,97 @@ enum WeatherAPI {
             "timeformat": "unixtime",
             "forecast_days": String(forecastDays),
         ]
+        let marineURL = "https://marine-api.open-meteo.com/v1/marine"
         async let weather = get(OMForecast.self, "https://api.open-meteo.com/v1/forecast", common.merging([
             "hourly": "temperature_2m,precipitation_probability",
             "daily": "sunrise,sunset,temperature_2m_max,temperature_2m_min",
         ]) { $1 })
-        async let marine = try? get(OMMarine.self, "https://marine-api.open-meteo.com/v1/marine", common.merging([
-            "hourly": "sea_level_height_msl",
+        async let model = try? get(OMMarine.self, marineURL, common.merging([
+            "hourly": "sea_level_height_msl,swell_wave_height,swell_wave_period",
             "cell_selection": "sea",
         ]) { $1 })
+        async let gfsWave = try? get(OMMarine.self, marineURL, common.merging([
+            "hourly": "swell_wave_height,swell_wave_period",
+            "models": "ncep_gfswave025",
+            "cell_selection": "sea",
+        ]) { $1 })
+        async let noaa = noaaTides(loc.tideStation?.id)
 
         let w = try await weather
-        var tides: [Tide]? = nil
-        if let m = await marine, let h = m.hourly,
-           distanceKm(loc.lat, loc.lon, m.latitude, m.longitude) <= coastMaxKm {
-            tides = findTides(time: h.time, level: h.sea_level_height_msl)
+        let m = await model
+        let g = await gfsWave
+        let n = await noaa
+
+        func near(_ x: OMMarine?, _ km: Double) -> OMMarine.H? {
+            guard let x, let h = x.hourly, distanceKm(loc.lat, loc.lon, x.latitude, x.longitude) <= km else { return nil }
+            return h
         }
+        func hasValues(_ a: [Double?]??) -> Bool { (a ?? nil)?.contains { $0 != nil } ?? false }
+
+        var tides: [Tide]? = nil
+        var datum: String? = nil
+        var tideSource: String? = nil
+        if let n, !n.isEmpty, let station = loc.tideStation {
+            tides = n
+            datum = "MLLW"
+            tideSource = "NOAA · \(station.name)"
+        } else if let h = near(m, coastMaxKm), let level = h.sea_level_height_msl ?? nil,
+                  let found = findTides(time: h.time, level: level) {
+            tides = found
+            datum = "MSL"
+            tideSource = "Open-Meteo model"
+        }
+
+        var swell: Forecast.Swell? = nil
+        let coastal = tides != nil || near(m, coastMaxKm) != nil
+        if coastal, let h = near(g, swellMaxKm), hasValues(h.swell_wave_height) {
+            swell = .init(time: h.time, height: h.swell_wave_height ?? [], period: h.swell_wave_period ?? [], source: "NOAA GFS-Wave")
+        } else if let h = near(m, coastMaxKm), hasValues(h.swell_wave_height) {
+            swell = .init(time: h.time, height: h.swell_wave_height ?? [], period: h.swell_wave_period ?? [], source: "Open-Meteo")
+        }
+
         return Forecast(
             fetchedAt: Date().timeIntervalSince1970.rounded(.down),
             tz: w.timezone,
             hourly: .init(time: w.hourly.time, temp: w.hourly.temperature_2m, pop: w.hourly.precipitation_probability),
             daily: .init(time: w.daily.time, sunrise: w.daily.sunrise, sunset: w.daily.sunset,
                          max: w.daily.temperature_2m_max, min: w.daily.temperature_2m_min),
-            tides: tides
+            tides: tides,
+            tideDatum: datum,
+            tideSource: tideSource,
+            swell: swell
         )
+    }
+
+    /// NOAA CO-OPS high/low predictions (metres above MLLW), starting a day back.
+    private static func noaaTides(_ station: String?) async -> [Tide]? {
+        guard let station else { return nil }
+        let day = DateFormatter()
+        day.locale = Locale(identifier: "en_US_POSIX")
+        day.timeZone = TimeZone(identifier: "UTC")
+        day.dateFormat = "yyyyMMdd"
+        let stamp = DateFormatter()
+        stamp.locale = Locale(identifier: "en_US_POSIX")
+        stamp.timeZone = TimeZone(identifier: "UTC")
+        stamp.dateFormat = "yyyy-MM-dd HH:mm"
+
+        guard let data = try? await get(NOAAPredictions.self, "https://api.tidesandcurrents.noaa.gov/api/prod/datagetter", [
+            "begin_date": day.string(from: Date().addingTimeInterval(-86400)),
+            "range": String((forecastDays + 2) * 24),
+            "station": station,
+            "product": "predictions",
+            "datum": "MLLW",
+            "interval": "hilo",
+            "units": "metric",
+            "time_zone": "gmt",
+            "format": "json",
+            "application": "daily-weather",
+        ]), let predictions = data.predictions else { return nil }
+
+        return predictions.compactMap { p in
+            guard let date = stamp.date(from: p.t), let v = Double(p.v) else { return nil }
+            return Tide(time: date.timeIntervalSince1970, kind: p.type == "H" ? "high" : "low", height: v)
+        }
     }
 
     static func findTides(time: [Double], level: [Double?]) -> [Tide]? {

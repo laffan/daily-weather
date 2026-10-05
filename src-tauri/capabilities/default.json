@@ -3,5 +3,16 @@
   "identifier": "default",
   "description": "Permissions for the main window",
   "windows": ["main"],
-  "permissions": ["core:default"]
+  "permissions": [
+    "core:default",
+    {
+      "identifier": "http:default",
+      "allow": [
+        { "url": "https://api.open-meteo.com/*" },
+        { "url": "https://marine-api.open-meteo.com/*" },
+        { "url": "https://geocoding-api.open-meteo.com/*" },
+        { "url": "https://api.tidesandcurrents.noaa.gov/*" }
+      ]
+    }
+  ]
 }

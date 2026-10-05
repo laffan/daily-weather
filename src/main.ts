@@ -1,6 +1,6 @@
 import "./style.css";
-import { fetchForecast, searchPlaces, type PlaceResult } from "./api";
-import { attachScrub, forecastWindow, renderChart, type Window } from "./chart";
+import { fetchForecast, findTideStation, searchPlaces, type PlaceResult } from "./api";
+import { attachScrub, buildChart, forecastWindow, swellAt, tideAt, type Window } from "./chart";
 import * as fmt from "./format";
 import { loadState, saveState } from "./store";
 import type { AppState, Forecast, SavedLocation } from "./types";
@@ -64,9 +64,10 @@ function renderCard(loc: SavedLocation) {
   } else if (!win) {
     body = `<p class="note">The saved forecast has run out. Connect to refresh.</p>`;
   } else {
-    body = `<p class="readout">${defaultReadout(f, win)}</p>
+    const sea = hasSea(f, win);
+    body = `<div class="readout">${readout(f, win, null)}</div>
       <div class="chart"></div>
-      <p class="facts">${facts(f, win)}</p>`;
+      ${sea ? legend(f) : ""}`;
   }
 
   const meta = `<footer class="meta">${
@@ -83,11 +84,12 @@ function renderCard(loc: SavedLocation) {
   if (f && win) {
     const holder = $(".chart", card);
     const width = Math.max(240, Math.floor(holder.clientWidth || card.clientWidth - 32));
-    holder.innerHTML = renderChart(f, win, state.units, width);
-    const readout = $(".readout", card);
-    attachScrub($<SVGSVGElement>("svg", holder), win, width, (i) => {
-      readout.innerHTML = i == null ? defaultReadout(f, win) : hourReadout(f, win, i);
-      readout.classList.toggle("active", i != null);
+    const chart = buildChart(f, win, state.units, width);
+    holder.innerHTML = chart.svg;
+    const out = $(".readout", card);
+    attachScrub($<SVGSVGElement>("svg", holder), chart, win, width, (i) => {
+      out.innerHTML = readout(f, win, i);
+      out.classList.toggle("active", i != null);
     });
   }
 }
@@ -104,7 +106,20 @@ function currentConditions(f: Forecast, w: Window) {
   return { temp, max: f.daily.max[d], min: f.daily.min[d], pop: f.hourly.pop[i] };
 }
 
-function defaultReadout(f: Forecast, w: Window): string {
+function hasSea(f: Forecast, w: Window): boolean {
+  return tideAt(f.tides, w.start) != null || f.hourly.time.slice(w.idx, w.idx + 24).some((t) => swellAt(f, t));
+}
+
+/** Line 1: weather. Line 2 (coastal places): tide and swell. `i` = scrubbed hour, or null. */
+function readout(f: Forecast, w: Window, i: number | null): string {
+  const lines = [i == null ? weatherSummary(f, w) : weatherAt(f, w.idx + i)];
+  if (hasSea(f, w)) lines.push(i == null ? seaSummary(f, w) : seaAt(f, f.hourly.time[w.idx + i]));
+  return lines.map((l) => `<p>${l || "&nbsp;"}</p>`).join("");
+}
+
+const dot = ` <span class="dim">·</span> `;
+
+function weatherSummary(f: Forecast, w: Window): string {
   const pops = f.hourly.pop.slice(w.idx, w.idx + 24).map((p) => p ?? 0);
   const firstWet = pops.findIndex((p) => p >= 40);
   if (firstWet === 0) return `Rain likely now <span class="dim">· ${pops[0]}%</span>`;
@@ -113,24 +128,42 @@ function defaultReadout(f: Forecast, w: Window): string {
   return max >= 10 ? `Rain chance ≤ ${max}% next 24h` : "Dry next 24h";
 }
 
-function hourReadout(f: Forecast, w: Window, i: number): string {
-  const k = w.idx + i;
-  return `${fmt.hour(f.hourly.time[k], f.tz)} <span class="dim">·</span> ${fmt.temp(f.hourly.temp[k], state.units)} <span class="dim">·</span> ${f.hourly.pop[k] ?? 0}% rain`;
+function weatherAt(f: Forecast, k: number): string {
+  return [fmt.hour(f.hourly.time[k], f.tz), fmt.temp(f.hourly.temp[k], state.units), `${f.hourly.pop[k] ?? 0}% rain`].join(dot);
 }
 
-function facts(f: Forecast, w: Window): string {
-  const end = w.start + 24 * 3600;
-  const t = nowSec();
-  const items: [number, string][] = [];
-  f.daily.sunrise.forEach((s) => s > t && s < end && items.push([s, `Sunrise ${fmt.clock(s, f.tz)}`]));
-  f.daily.sunset.forEach((s) => s > t && s < end && items.push([s, `Sunset ${fmt.clock(s, f.tz)}`]));
-  // The chart marks every tide; spell out only the next high and next low.
-  for (const kind of ["high", "low"] as const) {
-    const tide = f.tides?.find((x) => x.kind === kind && x.time > t);
-    if (tide && tide.time < end) items.push([tide.time, `${kind === "high" ? "High" : "Low"} tide ${fmt.clock(tide.time, f.tz)}`]);
+function seaSummary(f: Forecast, w: Window): string {
+  const parts: string[] = [];
+  const now = tideAt(f.tides, nowSec());
+  if (now) parts.push(`Tide ${now.rising ? "rising" : "falling"}${now.mid ? ", mid" : ""}`);
+  const swell = f.hourly.time.slice(w.idx, w.idx + 24).map((t) => swellAt(f, t)).filter((s) => s != null);
+  if (swell.length) {
+    const hs = swell.map((s) => s.height);
+    const lo = Math.min(...hs), hi = Math.max(...hs);
+    const range = fmt.length(lo, state.units) === fmt.length(hi, state.units)
+      ? fmt.length(hi, state.units)
+      : `${fmt.length(lo, state.units).replace(/ \w+$/, "")}–${fmt.length(hi, state.units)}`;
+    const period = swell[0].period;
+    parts.push(`Swell ${range}${period ? ` <span class="dim">@ ${Math.round(period)}s</span>` : ""}`);
   }
-  items.sort((a, b) => a[0] - b[0]);
-  return items.map(([, s]) => `<span>${esc(s)}</span>`).join("");
+  return parts.join(dot);
+}
+
+function seaAt(f: Forecast, t: number): string {
+  const parts: string[] = [];
+  const tide = tideAt(f.tides, t);
+  if (tide) parts.push(`Tide ${fmt.length(tide.level, state.units)} ${tide.rising ? "↑" : "↓"}${tide.mid ? " mid" : ""}`);
+  const swell = swellAt(f, t);
+  if (swell) parts.push(`Swell ${fmt.length(swell.height, state.units)}${swell.period ? ` <span class="dim">@ ${Math.round(swell.period)}s</span>` : ""}`);
+  return parts.join(dot);
+}
+
+function legend(f: Forecast): string {
+  const items: string[] = [];
+  if (f.tides) items.push(`<span><i class="sw sw-rising"></i>Rising</span>`, `<span><i class="sw sw-mid"></i>Mid, rising</span>`);
+  if (f.swell) items.push(`<span><i class="sw sw-swell"></i>Swell</span>`);
+  const sources = [f.tideSource && `Tides: ${f.tideSource}`, f.swell?.source && `Swell: ${f.swell.source}`].filter(Boolean);
+  return `<p class="legend">${items.join("")}</p>${sources.length ? `<p class="source">${sources.map((x) => `<span>${esc(x!)}</span>`).join(" · ")}${f.tideDatum === "MSL" ? " <span>(heights vs. mean sea level)</span>" : ""}</p>` : ""}`;
 }
 
 function renderStatus() {
@@ -149,6 +182,10 @@ async function refresh(loc: SavedLocation) {
   renderCard(loc);
   renderStatus();
   try {
+    if (loc.tideStation === undefined) {
+      // Looked up once per place; a failure leaves it undefined to retry next time.
+      loc.tideStation = await findTideStation(loc.lat, loc.lon).catch(() => undefined);
+    }
     const f = await fetchForecast(loc);
     // The location may have been removed while we were waiting.
     if (state.locations.some((l) => l.id === loc.id)) {

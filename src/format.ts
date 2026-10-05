@@ -57,3 +57,17 @@ export function capturedAt(unix: number): string {
   if (d.toDateString() === new Date().toDateString()) return time;
   return `${d.toLocaleDateString(undefined, { weekday: "short" })} ${time}`;
 }
+
+/** Hour of day 0–23 at the location. */
+export function hour24(unix: number, tz: string): string {
+  return formatter(tz, { hour: "numeric", hourCycle: "h23" }).format(unix * 1000);
+}
+
+/** Wave / tide heights: feet with °F, metres with °C. */
+export function length(metres: number, units: Units, digits?: number): string {
+  if (units === "f") {
+    const ft = metres * 3.28084;
+    return `${ft.toFixed(digits ?? (Math.abs(ft) < 10 ? 1 : 0))} ft`;
+  }
+  return `${metres.toFixed(digits ?? 1)} m`;
+}

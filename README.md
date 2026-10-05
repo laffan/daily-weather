@@ -6,21 +6,35 @@ it — in the app and in iOS widgets — when there isn't one, always with the
 time the data was captured.
 
 Built with [Tauri 2](https://v2.tauri.app) (TypeScript UI, Rust shell) plus a
-native SwiftUI WidgetKit extension. Weather data comes from
-[Open-Meteo](https://open-meteo.com) (free, no API key).
+native SwiftUI WidgetKit extension. All data sources are free and need no API key:
+
+| Data | Source |
+|---|---|
+| Temperature, rain chance, sunrise/sunset | [Open-Meteo forecast API](https://open-meteo.com/en/docs) |
+| Tides (US) | [NOAA CO-OPS](https://api.tidesandcurrents.noaa.gov/api/prod/) high/low predictions from the nearest station within 30 km |
+| Tides (elsewhere) | Open-Meteo marine model (`sea_level_height_msl`); coarse, not for navigation |
+| Swell | NOAA GFS-Wave (WAVEWATCH III) via the [Open-Meteo marine API](https://open-meteo.com/en/docs/marine-weather-api) (`models=ncep_gfswave025`), falling back to Open-Meteo's default wave model |
 
 ## What it does
 
 - **Saved places.** Tap **+** to search by name, or type coordinates
   (`36.97, -122.03`; this works offline). **Edit** reorders or removes them.
-- **One card per place**: current temperature, today's high/low, and a
-  24-hour chart: temperature line on top, hourly rain-chance bars below,
-  night shaded with sunrise/sunset times. Drag across the chart to read
-  any hour.
-- **Tides** for places near the coast: high/low marks on the chart and the next
-  high and low tide times. A place counts as coastal when Open-Meteo's marine
-  model has a sea grid cell within 25 km. The tide times come from that model's
-  `sea_level_height_msl`, which is coarse and **not suitable for navigation**.
+- **One card per place**: current temperature, today's high/low, and two
+  stacked 24-hour charts that share a time axis:
+  1. **Weather**: a temperature line over hourly rain-chance bars.
+  2. **Sea** (coastal places only): the tide curve with high and low tides
+     marked and timed, over hourly swell-height bars. The rising tide is
+     lightly tinted, and the middle third of the rise (mid tide, rising) is
+     tinted a little darker.
+
+  Hour numbers (12-hour clock) sit between the two charts, with a faint grid
+  line for every hour and noon/midnight emphasised. Dotted sunrise and sunset
+  lines run through both charts. Drag across either chart to read that hour's
+  temperature, rain chance, tide height and direction, and swell height and
+  period.
+- **Coastal detection**: a place counts as coastal when it has a NOAA tide
+  station within 30 km, or when Open-Meteo's marine model has a sea grid cell
+  within 25 km. The tide station is looked up once per place.
 - **Automatic refresh**: on launch, when the app comes to the foreground, when
   the device comes back online, and every minute while open, any place whose
   data is older than 30 minutes is re-downloaded. Failures are silent, and the
@@ -37,8 +51,8 @@ native SwiftUI WidgetKit extension. Weather data comes from
 
 ```
 src/                         UI (vanilla TypeScript + SVG, no framework)
-  api.ts                     Open-Meteo forecast, marine (tides), geocoding
-  chart.ts                   24-hour chart
+  api.ts                     Open-Meteo forecast/marine/geocoding, NOAA tides
+  chart.ts                   stacked 24-hour weather + sea charts
   store.ts                   persistence (Tauri file, or localStorage in a browser)
 src-tauri/
   src/lib.rs                 load_state / save_state commands
