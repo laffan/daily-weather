@@ -5,6 +5,7 @@ import WidgetKit
 struct DailyWeatherWidgets: WidgetBundle {
     var body: some Widget {
         DailyWeatherWidget()
+        DailyWeatherForecastWidget()
     }
 }
 
@@ -21,6 +22,22 @@ struct DailyWeatherWidget: Widget {
             .accessoryRectangular,
             .accessoryCircular,
             .accessoryInline,
+        ])
+    }
+}
+
+/// Current conditions plus the five-day outlook (highs, lows, rain chance).
+struct DailyWeatherForecastWidget: Widget {
+    var body: some WidgetConfiguration {
+        AppIntentConfiguration(kind: "DailyWeatherForecast", intent: SelectPlaceIntent.self, provider: Provider()) { entry in
+            ForecastWidgetView(entry: entry)
+        }
+        .configurationDisplayName("Daily Weather Forecast")
+        .description("The next five days' highs, lows and rain chance, with when the data was last updated.")
+        .supportedFamilies([
+            .systemMedium,
+            .systemLarge,
+            .accessoryRectangular,
         ])
     }
 }

@@ -66,7 +66,7 @@ function renderCard(loc: SavedLocation) {
   } else if (!win) {
     body = `<p class="note">The saved forecast has run out. Connect to refresh.</p>`;
   } else {
-    body = `<div class="chart"></div>${summary(f, win)}`;
+    body = `<div class="chart"></div>${outlook(f)}${summary(f, win)}`;
   }
 
   const meta = `<footer class="meta">${
@@ -158,6 +158,28 @@ function seaAt(f: Forecast, t: number): string {
   const swell = swellAt(f, t);
   if (swell) parts.push(`Swell ${fmt.length(swell.height, state.units)}${swell.period ? ` <span class="dim">@ ${Math.round(swell.period)}s</span>` : ""}`);
   return parts.join(dot);
+}
+
+const OUTLOOK_DAYS = 5;
+
+/** The next five days after today: high, low and peak rain chance from the hourly data. */
+function outlook(f: Forecast): string {
+  const t = nowSec();
+  const today = f.daily.time.findLastIndex((d) => d <= t);
+  const days = [];
+  for (let d = today + 1; d <= today + OUTLOOK_DAYS && d < f.daily.time.length; d++) {
+    const start = f.daily.time[d];
+    const end = f.daily.time[d + 1] ?? start + 86400;
+    const pops = f.hourly.time.flatMap((h, k) => (h >= start && h < end ? [f.hourly.pop[k] ?? 0] : []));
+    const pop = pops.length ? Math.max(...pops) : 0;
+    days.push(`<li>
+      <span class="dow">${esc(fmt.weekday(start + 12 * 3600, f.tz))}</span>
+      <span class="hi">${fmt.temp(f.daily.max[d], state.units)}</span>
+      <span class="lo">${fmt.temp(f.daily.min[d], state.units)}</span>
+      <span class="pop">${pop >= 20 ? `${pop}%` : ""}</span>
+    </li>`);
+  }
+  return days.length ? `<ol class="outlook" aria-label="Next ${days.length} days">${days.join("")}</ol>` : "";
 }
 
 /** Summary lines under the charts, plus where the sea data came from. */

@@ -37,6 +37,8 @@ native SwiftUI WidgetKit extension. All data sources are free and need no API ke
   sit under the charts. Drag across either chart to read that hour's
   temperature, rain chance, tide height and direction, and swell height and
   period in place of the card header.
+- **Five-day outlook** under the charts: each of the next five days with its
+  high, low and peak hourly rain chance (shown when 20% or more).
 - **Coastal detection**: a place counts as coastal when it has a NOAA tide
   station within 30 km, or when Open-Meteo's marine model has a sea grid cell
   within 25 km. The tide station is looked up once per place.
@@ -45,8 +47,12 @@ native SwiftUI WidgetKit extension. All data sources are free and need no API ke
   data is older than 30 minutes is re-downloaded. Failures are silent, and the
   cached forecast stays on screen. Every card shows "Updated 3h ago · 9:41a".
   The **↻** button forces a refresh.
-- **Widgets** (iOS 17+): small and medium home-screen widgets plus
-  rectangular, circular and inline lock-screen widgets. Each one shows a place
+- **Widgets** (iOS 17+), in two kinds:
+  - *Daily Weather*: small and medium home-screen widgets, plus rectangular,
+    circular and inline lock-screen widgets.
+  - *Daily Weather Forecast*: a medium widget with now plus the five-day
+    outlook, a large widget that adds the hourly chart, and a rectangular
+    lock-screen widget with the next three days. Each one shows a place
   you choose (long-press → Edit Widget). Widgets display how old their data is,
   and they keep showing the current hour from the cached hourly forecast while
   offline. They also download fresh data on their own about every 30 minutes

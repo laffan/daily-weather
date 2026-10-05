@@ -2,7 +2,7 @@ import Charts
 import SwiftUI
 import WidgetKit
 
-private let rainBlue = Color(red: 0.165, green: 0.471, blue: 0.839) // #2a78d6, same as the app
+let rainBlue = Color(red: 0.165, green: 0.471, blue: 0.839) // #2a78d6, same as the app
 
 struct WeatherWidgetView: View {
     @Environment(\.widgetFamily) private var family
@@ -84,7 +84,7 @@ private struct MediumView: View {
 
 /// Temperature line over rain-chance bars. Each lives in its own band of the
 /// plot (temperature on top, rain below) so neither needs a y-axis.
-private struct HourlyChart: View {
+struct HourlyChart: View {
     let c: Conditions
     let tz: TimeZone
 
@@ -189,7 +189,7 @@ private struct InlineView: View {
 
 // MARK: - Shared bits
 
-private struct AgeLabel: View {
+struct AgeLabel: View {
     let f: Forecast, entry: WeatherEntry
 
     var body: some View {
@@ -203,7 +203,7 @@ private struct AgeLabel: View {
 }
 
 /// "20% rain · Sunset 6:41p · High tide 4:12a" — whatever is most useful next.
-private func detailLine(_ c: Conditions, _ f: Forecast) -> String {
+func detailLine(_ c: Conditions, _ f: Forecast) -> String {
     var parts = ["\(Int(c.pop ?? 0))% rain"]
     if let sun = c.nextSun {
         parts.append("\(sun.isSunrise ? "↑" : "↓") \(Fmt.clock(sun.date, f.timeZone))")
@@ -214,7 +214,7 @@ private func detailLine(_ c: Conditions, _ f: Forecast) -> String {
     return parts.joined(separator: " · ")
 }
 
-private struct EmptyStateView: View {
+struct EmptyStateView: View {
     @Environment(\.widgetFamily) private var family
     let entry: WeatherEntry
 
@@ -234,5 +234,139 @@ private struct EmptyStateView: View {
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         }
+    }
+}
+
+// MARK: - Forecast widget (current conditions + five-day outlook)
+
+/// The "Daily Weather Forecast" widget: now + the five-day outlook.
+struct ForecastWidgetView: View {
+    @Environment(\.widgetFamily) private var family
+    let entry: WeatherEntry
+
+    var body: some View {
+        content.containerBackground(for: .widget) {
+            switch family {
+            case .accessoryRectangular: Color.clear
+            default: Color(uiColor: .systemBackground)
+            }
+        }
+    }
+
+    @ViewBuilder private var content: some View {
+        if let loc = entry.location, let f = entry.forecast, let c = entry.conditions {
+            switch family {
+            case .systemLarge: ForecastLargeView(loc: loc, f: f, c: c, entry: entry)
+            case .accessoryRectangular: ForecastRectangularView(f: f, c: c, entry: entry)
+            default: ForecastMediumView(loc: loc, f: f, c: c, entry: entry)
+            }
+        } else {
+            EmptyStateView(entry: entry)
+        }
+    }
+}
+
+/// Name and current temperature on the left; today's high/low and data age on the right.
+private struct ForecastHeader: View {
+    let loc: SavedLocation, f: Forecast, c: Conditions, entry: WeatherEntry
+
+    var body: some View {
+        HStack(alignment: .top) {
+            VStack(alignment: .leading, spacing: 0) {
+                Text(loc.name).font(.footnote.weight(.semibold)).lineLimit(1)
+                Text(Fmt.temp(c.temp, entry.units))
+                    .font(.system(size: 34, weight: .light))
+                    .minimumScaleFactor(0.6)
+            }
+            Spacer(minLength: 8)
+            VStack(alignment: .trailing, spacing: 2) {
+                Text("H \(Fmt.temp(c.high, entry.units))  L \(Fmt.temp(c.low, entry.units))")
+                    .font(.caption2).foregroundStyle(.secondary)
+                AgeLabel(f: f, entry: entry)
+            }
+        }
+    }
+}
+
+/// Five columns: weekday, high, low, and peak rain chance when it's 20 % or more.
+struct OutlookRow: View {
+    let days: [DayOutlook]
+    let units: String
+    let tz: TimeZone
+
+    var body: some View {
+        HStack(spacing: 0) {
+            ForEach(Array(days.enumerated()), id: \.offset) { _, day in
+                VStack(spacing: 1) {
+                    Text(Fmt.weekday(day.date, tz)).font(.caption2).foregroundStyle(.secondary)
+                    Text(Fmt.temp(day.high, units)).font(.footnote.weight(.medium))
+                    Text(Fmt.temp(day.low, units)).font(.caption).foregroundStyle(.secondary)
+                    HStack(spacing: 2) {
+                        if day.pop >= 20 {
+                            RoundedRectangle(cornerRadius: 1).fill(rainBlue).frame(width: 4, height: 4)
+                            Text("\(Int(day.pop))%")
+                        } else {
+                            Text(" ")
+                        }
+                    }
+                    .font(.system(size: 9))
+                    .foregroundStyle(.secondary)
+                }
+                .frame(maxWidth: .infinity)
+            }
+        }
+        .monospacedDigit()
+    }
+}
+
+private struct ForecastMediumView: View {
+    let loc: SavedLocation, f: Forecast, c: Conditions, entry: WeatherEntry
+
+    var body: some View {
+        VStack(spacing: 6) {
+            ForecastHeader(loc: loc, f: f, c: c, entry: entry)
+            Spacer(minLength: 0)
+            OutlookRow(days: c.days, units: entry.units, tz: f.timeZone)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+    }
+}
+
+private struct ForecastLargeView: View {
+    let loc: SavedLocation, f: Forecast, c: Conditions, entry: WeatherEntry
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            ForecastHeader(loc: loc, f: f, c: c, entry: entry)
+            HourlyChart(c: c, tz: f.timeZone)
+            Text(detailLine(c, f)).font(.caption2).foregroundStyle(.secondary).lineLimit(1)
+            Divider()
+            OutlookRow(days: c.days, units: entry.units, tz: f.timeZone)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+    }
+}
+
+/// Lock screen: the next three days, plus how old the data is.
+private struct ForecastRectangularView: View {
+    let f: Forecast, c: Conditions, entry: WeatherEntry
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 1) {
+            HStack(spacing: 0) {
+                ForEach(Array(c.days.prefix(3).enumerated()), id: \.offset) { _, day in
+                    VStack(alignment: .leading, spacing: 0) {
+                        Text(Fmt.weekday(day.date, f.timeZone)).font(.caption2.weight(.semibold))
+                        Text("\(Fmt.temp(day.high, entry.units)) \(Fmt.temp(day.low, entry.units))")
+                            .font(.caption)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                }
+            }
+            Text(Fmt.age(f.fetchedDate, now: entry.date))
+                .font(.caption2).foregroundStyle(.secondary).lineLimit(1)
+        }
+        .monospacedDigit()
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 }

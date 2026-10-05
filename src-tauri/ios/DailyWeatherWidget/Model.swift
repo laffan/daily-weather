@@ -296,7 +296,19 @@ enum WeatherAPI {
 
 // MARK: - Reading a forecast at a moment in time
 
+/// One day of the five-day outlook.
+struct DayOutlook {
+    let date: Date // local midnight
+    let high: Double?
+    let low: Double?
+    /// Highest hourly rain chance that day, 0–100.
+    let pop: Double
+}
+
 struct Conditions {
+    /// Days in the outlook (after today), as in the app.
+    static let outlookDays = 5
+
     let temp: Double?
     let high: Double?
     let low: Double?
@@ -307,6 +319,8 @@ struct Conditions {
     let hours: [(date: Date, temp: Double?, pop: Double?)]
     /// Night intervals overlapping the chart window.
     let nights: [(start: Date, end: Date)]
+    /// The next days after today (up to `outlookDays`).
+    let days: [DayOutlook]
 
     init?(_ f: Forecast, at date: Date, hours count: Int = 12) {
         let t = date.timeIntervalSince1970
@@ -322,6 +336,24 @@ struct Conditions {
         let d = f.daily.time.indices.last(where: { f.daily.time[$0] <= t }) ?? 0
         high = f.daily.max.indices.contains(d) ? f.daily.max[d] : nil
         low = f.daily.min.indices.contains(d) ? f.daily.min[d] : nil
+
+        var days: [DayOutlook] = []
+        var k = d + 1
+        while k < f.daily.time.count, days.count < Self.outlookDays {
+            let start = f.daily.time[k]
+            let end = k + 1 < f.daily.time.count ? f.daily.time[k + 1] : start + 86400
+            let pops = f.hourly.time.indices
+                .filter { f.hourly.time[$0] >= start && f.hourly.time[$0] < end }
+                .map { f.hourly.pop[$0] ?? 0 }
+            days.append(DayOutlook(
+                date: Date(timeIntervalSince1970: start),
+                high: f.daily.max.indices.contains(k) ? f.daily.max[k] : nil,
+                low: f.daily.min.indices.contains(k) ? f.daily.min[k] : nil,
+                pop: pops.max() ?? 0
+            ))
+            k += 1
+        }
+        self.days = days
 
         let suns = (f.daily.sunrise.map { ($0, true) } + f.daily.sunset.map { ($0, false) })
             .filter { $0.0 > t }
@@ -374,6 +406,14 @@ enum Fmt {
         f.timeZone = tz
         f.setLocalizedDateFormatFromTemplate("j")
         return compact(f.string(from: date))
+    }
+
+    /// "Tue" — weekday at the place. Uses midday so DST shifts can't land on the previous day.
+    static func weekday(_ dayStart: Date, _ tz: TimeZone) -> String {
+        let f = DateFormatter()
+        f.timeZone = tz
+        f.setLocalizedDateFormatFromTemplate("EEE")
+        return f.string(from: dayStart.addingTimeInterval(12 * 3600))
     }
 
     /// "now", "12m", "3h", "2d"
