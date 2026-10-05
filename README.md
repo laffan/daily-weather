@@ -18,20 +18,24 @@ native SwiftUI WidgetKit extension. All data sources are free and need no API ke
 ## What it does
 
 - **Saved places.** Tap **+** to search by name, or type coordinates
-  (`36.97, -122.03`; this works offline). **Edit** reorders or removes them.
+  (`36.97, -122.03`; this works offline). **Edit** shows ↑/↓ to reorder and a
+  **Remove** button under each card (tap it twice to confirm).
 - **One card per place**: current temperature, today's high/low, and two
   stacked 24-hour charts that share a time axis:
   1. **Weather**: a temperature line over hourly rain-chance bars.
   2. **Sea** (coastal places only): the tide curve with high and low tides
-     marked and timed, over hourly swell-height bars. The rising tide is
-     lightly tinted, and the middle third of the rise (mid tide, rising) is
-     tinted a little darker.
+     marked and timed, with the rising tide lightly tinted, over hourly
+     swell bars. Swell uses a fixed 0–5 ft scale, and each bar is a stack of
+     short gray lines worth half a foot each (taller swell fills the stack, and
+     the peak is labelled with its real height).
 
   Hour numbers (12-hour clock) sit between the two charts, with a faint grid
-  line for every hour and noon/midnight emphasised. Dotted sunrise and sunset
-  lines run through both charts. Drag across either chart to read that hour's
+  line for every hour and noon/midnight emphasised. A red line marks the
+  current time, and dotted sunrise and sunset lines run through both charts.
+  One-line summaries ("Rain likely from 9a", "Tide rising · Swell 2–4 ft @ 13s")
+  sit under the charts. Drag across either chart to read that hour's
   temperature, rain chance, tide height and direction, and swell height and
-  period.
+  period in place of the card header.
 - **Coastal detection**: a place counts as coastal when it has a NOAA tide
   station within 30 km, or when Open-Meteo's marine model has a sea grid cell
   within 25 km. The tide station is looked up once per place.

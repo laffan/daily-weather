@@ -1,7 +1,7 @@
 // Two stacked 24-hour charts sharing one time axis:
 //   1. weather — temperature line over hourly rain-chance bars
-//   2. sea     — tide curve (rising tide tinted, darker at mid tide; highs/lows labelled)
-//                over hourly swell-height bars; only for coastal places
+//   2. sea     — tide curve (rising tide tinted, highs/lows labelled) over
+//                hourly swell bars on a fixed 0–5 ft scale; coastal places only
 // Hour numbers sit between the two. Sunrise/sunset lines and the faint
 // hour grid run through both. Each measure has its own band, so no chart
 // needs a y-axis.
@@ -23,10 +23,13 @@ const SEA_TOP = 126;
 const TIDE_TOP = 18; // offsets within the sea chart
 const TIDE_BOTTOM = 52;
 const TIDE_FLOOR = 60; // tint fills down to here so low water still shows a sliver
-const SWELL_TOP = 74;
-const SWELL_BOTTOM = 96;
-/** Swell bars are scaled against at least this (metres ≈ 10 ft), so small surf looks small. */
-const SWELL_SCALE_MIN = 3;
+/** Swell bars are stacks of short lines, each worth half a foot; 10 lines = 5 ft (fixed scale). */
+const SWELL_STEP_M = 0.5 / 3.28084;
+const SWELL_LINES = 10;
+const SWELL_LINE = 2; // px thick
+const SWELL_GAP = 1; // px between lines
+const SWELL_BOTTOM = 104;
+const SWELL_TOP = SWELL_BOTTOM - SWELL_LINES * (SWELL_LINE + SWELL_GAP) + SWELL_GAP;
 
 export interface Window {
   start: number; // unix seconds, top of the current hour
@@ -85,7 +88,7 @@ export interface Chart {
 const esc = (s: string) => s.replace(/[&<>"]/g, (c) => `&#${c.charCodeAt(0)};`);
 const r1 = (v: number) => Math.round(v * 10) / 10;
 
-export function buildChart(f: Forecast, w: Window, units: Units, width: number): Chart {
+export function buildChart(f: Forecast, w: Window, units: Units, width: number, nowSec = Date.now() / 1000): Chart {
   const end = w.start + HOURS * 3600;
   const plotW = width - 2 * PAD_X;
   const step = plotW / HOURS;
@@ -186,14 +189,14 @@ export function buildChart(f: Forecast, w: Window, units: Units, width: number):
     const y = (v: number) => r1(bot - ((v - lo) / span) * (bot - top));
     const floor = seaTop + TIDE_FLOOR;
 
-    // Tints: a translucent layer under the whole rising tide, and a second
-    // one stacked on its middle third (mid tide, rising), which reads darker.
-    for (const [cls, test] of [["tint-rising", (s: TideState) => s.rising], ["tint-mid", (s: TideState) => s.rising && s.mid]] as const) {
+    // Tint under the curve wherever the tide is rising.
+    {
+      const test = (s: TideState) => s.rising;
       let run: { t: number; s: TideState }[] = [];
       const flush = () => {
         if (run.length >= 2) {
           const pts = run.map((p) => `${x(p.t)},${y(p.s.level)}`).join(" ");
-          back.push(`<polygon class="${cls}" points="${x(run[0].t)},${floor} ${pts} ${x(run[run.length - 1].t)},${floor}"/>`);
+          back.push(`<polygon class="tint-rising" points="${x(run[0].t)},${floor} ${pts} ${x(run[run.length - 1].t)},${floor}"/>`);
         }
         run = [];
       };
@@ -226,20 +229,29 @@ export function buildChart(f: Forecast, w: Window, units: Units, width: number):
 
   if (hasSwell) {
     const heights = times.slice(0, HOURS).map((t) => swellAt(f, t)?.height ?? 0);
-    const scale = Math.max(SWELL_SCALE_MIN, ...heights);
-    const sTop = seaTop + SWELL_TOP;
     const sBot = seaTop + SWELL_BOTTOM;
+    const lines = (h: number) => (h <= 0 ? 0 : Math.min(SWELL_LINES, Math.max(1, Math.round(h / SWELL_STEP_M))));
+    let d = "";
     heights.forEach((h, i) => {
-      if (h <= 0) return;
-      const bh = Math.max(1.5, (h / scale) * (sBot - sTop));
-      front.push(`<rect class="swell" x="${r1(x(times[i]) + (step - barW) / 2)}" y="${r1(sBot - bh)}" width="${r1(barW)}" height="${r1(bh)}" rx="1"/>`);
+      const bx = r1(x(times[i]) + (step - barW) / 2);
+      for (let k = 0; k < lines(h); k++) {
+        d += `M${bx},${sBot - k * (SWELL_LINE + SWELL_GAP) - SWELL_LINE}h${r1(barW)}v${SWELL_LINE}h${-r1(barW)}z`;
+      }
     });
+    front.push(`<path class="swell" d="${d}"/>`);
     front.push(`<line class="base" x1="${PAD_X}" x2="${width - PAD_X}" y1="${sBot + 0.5}" y2="${sBot + 0.5}"/>`);
     const pk = heights.indexOf(Math.max(...heights));
     if (heights[pk] > 0) {
-      const top = sBot - (heights[pk] / scale) * (sBot - sTop);
-      front.push(`<text class="label minor" x="${clampX(x(times[pk]) + step / 2, width)}" y="${r1(top - 3)}" text-anchor="middle">${fmt.length(heights[pk], units)}</text>`);
+      const top = sBot - lines(heights[pk]) * (SWELL_LINE + SWELL_GAP) + SWELL_GAP;
+      front.push(`<text class="label minor" x="${clampX(x(times[pk]) + step / 2, width)}" y="${r1(top - 4)}" text-anchor="middle">${fmt.length(heights[pk], units)}</text>`);
     }
+  }
+
+  // Current time, through both charts.
+  if (nowSec >= w.start && nowSec <= end) {
+    const nx = x(nowSec);
+    front.push(`<line class="now-line" x1="${nx}" x2="${nx}" y1="${TEMP_TOP - 8}" y2="${RAIN_BOTTOM}"/>`);
+    if (hasSea) front.push(`<line class="now-line" x1="${nx}" x2="${nx}" y1="${seaTop + (hasTides ? TIDE_TOP - 8 : SWELL_TOP)}" y2="${bottom}"/>`);
   }
 
   // Scrub cursor (positioned by attachScrub).

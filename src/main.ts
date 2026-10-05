@@ -47,16 +47,18 @@ function renderCard(loc: SavedLocation) {
   const tools = `<div class="tools">
       <button data-action="up" aria-label="Move up">↑</button>
       <button data-action="down" aria-label="Move down">↓</button>
-      <button data-action="remove" class="danger">Remove</button>
     </div>`;
+  const armed = armedRemove?.id === loc.id;
+  const remove = `<div class="remove-row"><button data-action="remove" class="danger${armed ? " armed" : ""}">${armed ? "Tap again to remove" : "Remove"}</button></div>`;
 
-  const head = `<header class="head">
+  // The scrub readout covers the header while a finger is on the chart.
+  const head = `<div class="top"><header class="head">
       <div class="where"><h2>${esc(loc.name)}</h2><p class="sub">${esc(loc.detail)}</p></div>
       <div class="now">
         <span class="big">${now ? fmt.temp(now.temp, state.units) : "–"}</span>
         <span class="sub">${now ? `H ${fmt.temp(now.max, state.units)}  L ${fmt.temp(now.min, state.units)}` : ""}</span>
       </div>
-    </header>`;
+    </header><div class="readout" aria-live="polite"></div></div>`;
 
   let body: string;
   if (!f) {
@@ -64,10 +66,7 @@ function renderCard(loc: SavedLocation) {
   } else if (!win) {
     body = `<p class="note">The saved forecast has run out. Connect to refresh.</p>`;
   } else {
-    const sea = hasSea(f, win);
-    body = `<div class="readout">${readout(f, win, null)}</div>
-      <div class="chart"></div>
-      ${sea ? legend(f) : ""}`;
+    body = `<div class="chart"></div>${summary(f, win)}`;
   }
 
   const meta = `<footer class="meta">${
@@ -78,7 +77,7 @@ function renderCard(loc: SavedLocation) {
         : ""
   }</footer>`;
 
-  card.innerHTML = tools + head + body + meta;
+  card.innerHTML = tools + head + body + meta + remove;
   card.classList.toggle("stale", !!f && nowSec() - f.fetchedAt > 6 * 3600);
 
   if (f && win) {
@@ -88,7 +87,7 @@ function renderCard(loc: SavedLocation) {
     holder.innerHTML = chart.svg;
     const out = $(".readout", card);
     attachScrub($<SVGSVGElement>("svg", holder), chart, win, width, (i) => {
-      out.innerHTML = readout(f, win, i);
+      out.innerHTML = i == null ? "" : hourReadout(f, win, i);
       out.classList.toggle("active", i != null);
     });
   }
@@ -110,11 +109,11 @@ function hasSea(f: Forecast, w: Window): boolean {
   return tideAt(f.tides, w.start) != null || f.hourly.time.slice(w.idx, w.idx + 24).some((t) => swellAt(f, t));
 }
 
-/** Line 1: weather. Line 2 (coastal places): tide and swell. `i` = scrubbed hour, or null. */
-function readout(f: Forecast, w: Window, i: number | null): string {
-  const lines = [i == null ? weatherSummary(f, w) : weatherAt(f, w.idx + i)];
-  if (hasSea(f, w)) lines.push(i == null ? seaSummary(f, w) : seaAt(f, f.hourly.time[w.idx + i]));
-  return lines.map((l) => `<p>${l || "&nbsp;"}</p>`).join("");
+/** The scrubbed hour: weather on the first line, tide and swell on the second. */
+function hourReadout(f: Forecast, w: Window, i: number): string {
+  const k = w.idx + i;
+  const sea = hasSea(f, w) ? seaAt(f, f.hourly.time[k]) : "";
+  return `<p>${weatherAt(f, k)}</p>${sea ? `<p class="dim">${sea}</p>` : ""}`;
 }
 
 const dot = ` <span class="dim">·</span> `;
@@ -158,12 +157,16 @@ function seaAt(f: Forecast, t: number): string {
   return parts.join(dot);
 }
 
-function legend(f: Forecast): string {
-  const items: string[] = [];
-  if (f.tides) items.push(`<span><i class="sw sw-rising"></i>Rising</span>`, `<span><i class="sw sw-mid"></i>Mid, rising</span>`);
-  if (f.swell) items.push(`<span><i class="sw sw-swell"></i>Swell</span>`);
+/** Summary lines under the charts, plus where the sea data came from. */
+function summary(f: Forecast, w: Window): string {
+  const lines = [weatherSummary(f, w)];
+  if (hasSea(f, w)) lines.push(seaSummary(f, w));
   const sources = [f.tideSource && `Tides: ${f.tideSource}`, f.swell?.source && `Swell: ${f.swell.source}`].filter(Boolean);
-  return `<p class="legend">${items.join("")}</p>${sources.length ? `<p class="source">${sources.map((x) => `<span>${esc(x!)}</span>`).join(" · ")}${f.tideDatum === "MSL" ? " <span>(heights vs. mean sea level)</span>" : ""}</p>` : ""}`;
+  return `<div class="summary">${lines.map((l) => `<p>${l}</p>`).join("")}</div>${
+    sources.length
+      ? `<p class="source">${sources.map((x) => `<span>${esc(x!)}</span>`).join(" · ")}${f.tideDatum === "MSL" ? " <span>(heights vs. mean sea level)</span>" : ""}</p>`
+      : ""
+  }`;
 }
 
 function renderStatus() {
@@ -229,9 +232,30 @@ async function addPlace(p: PlaceResult) {
   if (navigator.onLine) void refresh(loc);
 }
 
-async function removePlace(id: string) {
+// window.confirm() is a no-op in Tauri's iOS/macOS webview (it always
+// returns false), so removal is confirmed by tapping the button twice.
+let armedRemove: { id: string; timer: number } | null = null;
+
+async function removePlace(id: string, btn: HTMLElement) {
+  if (armedRemove?.id !== id) {
+    if (armedRemove) clearTimeout(armedRemove.timer);
+    document.querySelectorAll(".remove-row .armed").forEach((b) => (b.classList.remove("armed"), (b.textContent = "Remove")));
+    btn.classList.add("armed");
+    btn.textContent = "Tap again to remove";
+    armedRemove = {
+      id,
+      timer: window.setTimeout(() => {
+        armedRemove = null;
+        btn.classList.remove("armed");
+        btn.textContent = "Remove";
+      }, 4000),
+    };
+    return;
+  }
+  clearTimeout(armedRemove.timer);
+  armedRemove = null;
   const loc = state.locations.find((l) => l.id === id);
-  if (!loc || !confirm(`Remove ${loc.name}?`)) return;
+  if (!loc) return;
   state.locations = state.locations.filter((l) => l.id !== id);
   delete state.forecasts[id];
   if (state.locations.length === 0) editing = false;
@@ -300,7 +324,7 @@ function wire() {
       case "add":
         return openAdd();
       case "remove":
-        return id && removePlace(id);
+        return id && removePlace(id, btn!);
       case "up":
         return id && move(id, -1);
       case "down":
