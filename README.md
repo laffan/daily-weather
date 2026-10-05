@@ -10,7 +10,8 @@ native SwiftUI WidgetKit extension. All data sources are free and need no API ke
 
 | Data | Source |
 |---|---|
-| Temperature, rain chance, sunrise/sunset | [Open-Meteo forecast API](https://open-meteo.com/en/docs) |
+| Temperature (contiguous US) | NOAA [National Blend of Models](https://vlab.noaa.gov/web/mdl/nbm) (bias-corrected, 2.5 km) via Open-Meteo (`models=ncep_nbm_conus`) |
+| Temperature (elsewhere), rain chance, sunrise/sunset | [Open-Meteo forecast API](https://open-meteo.com/en/docs) default (`best_match`) |
 | Tides (US) | [NOAA CO-OPS](https://api.tidesandcurrents.noaa.gov/api/prod/) high/low predictions from the nearest station within 30 km |
 | Tides (elsewhere) | Open-Meteo marine model (`sea_level_height_msl`); coarse, not for navigation |
 | Swell | NOAA GFS-Wave (WAVEWATCH III) via the [Open-Meteo marine API](https://open-meteo.com/en/docs/marine-weather-api) (`models=ncep_gfswave025`), falling back to Open-Meteo's default wave model |

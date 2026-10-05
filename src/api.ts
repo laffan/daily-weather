@@ -1,5 +1,6 @@
 // Data sources (all free, no API keys):
-//   Open-Meteo forecast   temperature, rain chance, sunrise/sunset
+//   NOAA NBM              temperature in the contiguous US (bias-corrected), via Open-Meteo
+//   Open-Meteo forecast   temperature elsewhere, rain chance, sunrise/sunset
 //   NOAA CO-OPS           tide predictions from the nearest US station
 //   NOAA GFS-Wave model   hourly swell, served through Open-Meteo's marine API
 //   Open-Meteo marine     modelled tides where there is no NOAA station
@@ -108,11 +109,20 @@ export async function fetchForecast(loc: SavedLocation): Promise<Forecast> {
   };
   const q = (extra: Record<string, string>) => new URLSearchParams({ ...common, ...extra });
 
-  const [weather, model, gfsWave, noaa] = await Promise.all([
+  const [weather, nbm, model, gfsWave, noaa] = await Promise.all([
     getJson(`${FORECAST_URL}?${q({
       hourly: "temperature_2m,precipitation_probability",
       daily: "sunrise,sunset,temperature_2m_max,temperature_2m_min",
     })}`),
+    // NOAA's National Blend of Models: calibrated against observations, so
+    // it avoids the raw HRRR/GFS temperature biases that Open-Meteo's
+    // default uses in the US (it only takes rain probability from NBM).
+    // Contiguous US only; elsewhere this is empty or fails.
+    getJson(`${FORECAST_URL}?${q({
+      hourly: "temperature_2m",
+      daily: "temperature_2m_max,temperature_2m_min",
+      models: "ncep_nbm_conus",
+    })}`).catch(() => null),
     // Default marine models: modelled sea level (tides) + a swell fallback.
     getJson(`${MARINE_URL}?${q({
       hourly: "sea_level_height_msl,swell_wave_height,swell_wave_period",
@@ -146,7 +156,9 @@ export async function fetchForecast(loc: SavedLocation): Promise<Forecast> {
     },
     tides: null,
     swell: null,
+    tempSource: "Open-Meteo",
   };
+  preferNbm(f, nbm);
 
   const near = (m: any, km: number) => m?.hourly && distanceKm(loc.lat, loc.lon, m.latitude, m.longitude) <= km;
 
@@ -169,6 +181,23 @@ export async function fetchForecast(loc: SavedLocation): Promise<Forecast> {
     f.swell = swellFrom(model, "Open-Meteo");
   }
   return f;
+}
+
+/** Use NBM temperatures wherever NBM has a value for the same time; keep the default elsewhere. */
+function preferNbm(f: Forecast, nbm: any): void {
+  const pick = (times: number[], values: (number | null)[] | undefined) => {
+    const m = new Map<number, number>();
+    times?.forEach((t, i) => values?.[i] != null && m.set(t, values[i]!));
+    return m;
+  };
+  const hourly = pick(nbm?.hourly?.time, nbm?.hourly?.temperature_2m);
+  if (!hourly.size) return;
+  const max = pick(nbm.daily?.time, nbm.daily?.temperature_2m_max);
+  const min = pick(nbm.daily?.time, nbm.daily?.temperature_2m_min);
+  f.hourly.temp = f.hourly.time.map((t, i) => hourly.get(t) ?? f.hourly.temp[i]);
+  f.daily.max = f.daily.time.map((t, i) => max.get(t) ?? f.daily.max[i]);
+  f.daily.min = f.daily.time.map((t, i) => min.get(t) ?? f.daily.min[i]);
+  f.tempSource = "NOAA NBM";
 }
 
 function swellFrom(m: any, source: string): NonNullable<Forecast["swell"]> {

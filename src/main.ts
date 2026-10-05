@@ -186,7 +186,11 @@ function outlook(f: Forecast): string {
 function summary(f: Forecast, w: Window): string {
   const lines = [weatherSummary(f, w)];
   if (hasSea(f, w)) lines.push(seaSummary(f, w));
-  const sources = [f.tideSource && `Tides: ${f.tideSource}`, f.swell?.source && `Swell: ${f.swell.source}`].filter(Boolean);
+  const sources = [
+    f.tempSource && `Temperature: ${f.tempSource}`,
+    f.tideSource && `Tides: ${f.tideSource}`,
+    f.swell?.source && `Swell: ${f.swell.source}`,
+  ].filter(Boolean);
   return `<div class="summary">${lines.map((l) => `<p>${l}</p>`).join("")}</div>${
     sources.length
       ? `<p class="source">${sources.map((x) => `<span>${esc(x!)}</span>`).join(" · ")}${f.tideDatum === "MSL" ? " <span>(heights vs. mean sea level)</span>" : ""}</p>`

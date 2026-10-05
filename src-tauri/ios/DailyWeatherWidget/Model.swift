@@ -50,6 +50,8 @@ struct Forecast: Codable {
     let tideDatum: String?
     let tideSource: String?
     let swell: Swell?
+    /// "NOAA NBM" in the contiguous US, otherwise "Open-Meteo".
+    let tempSource: String?
 
     var fetchedDate: Date { Date(timeIntervalSince1970: fetchedAt) }
     var timeZone: TimeZone { TimeZone(identifier: tz) ?? .current }
@@ -132,6 +134,21 @@ enum WeatherAPI {
         let daily: D
     }
 
+    /// NOAA National Blend of Models temperatures (contiguous US only).
+    private struct OMNbm: Decodable {
+        struct H: Decodable {
+            let time: [Double]
+            let temperature_2m: [Double?]?
+        }
+        struct D: Decodable {
+            let time: [Double]
+            let temperature_2m_max: [Double?]?
+            let temperature_2m_min: [Double?]?
+        }
+        let hourly: H?
+        let daily: D?
+    }
+
     private struct OMMarine: Decodable {
         struct H: Decodable {
             let time: [Double]
@@ -171,6 +188,12 @@ enum WeatherAPI {
             "forecast_days": String(forecastDays),
         ]
         let marineURL = "https://marine-api.open-meteo.com/v1/marine"
+        // Bias-corrected NBM temperatures where available; see preferNbm in src/api.ts.
+        async let nbm = try? get(OMNbm.self, "https://api.open-meteo.com/v1/forecast", common.merging([
+            "hourly": "temperature_2m",
+            "daily": "temperature_2m_max,temperature_2m_min",
+            "models": "ncep_nbm_conus",
+        ]) { $1 })
         async let weather = get(OMForecast.self, "https://api.open-meteo.com/v1/forecast", common.merging([
             "hourly": "temperature_2m,precipitation_probability",
             "daily": "sunrise,sunset,temperature_2m_max,temperature_2m_min",
@@ -189,6 +212,7 @@ enum WeatherAPI {
         async let noaa = noaaTides(loc.tideStation?.id)
 
         let w = try await weather
+        let b = await nbm
         let m = await model
         let g = await gfsWave
         let n = await noaa
@@ -221,16 +245,34 @@ enum WeatherAPI {
             swell = .init(time: h.time, height: h.swell_wave_height ?? [], period: h.swell_wave_period ?? [], source: "Open-Meteo")
         }
 
+        // Use NBM wherever it has a value for the same time; keep the default elsewhere.
+        func byTime(_ times: [Double]?, _ values: [Double?]??) -> [Double: Double] {
+            guard let times, let values = values ?? nil else { return [:] }
+            var out: [Double: Double] = [:]
+            for (i, t) in times.enumerated() where i < values.count {
+                if let v = values[i] { out[t] = v }
+            }
+            return out
+        }
+        let nbmHourly = byTime(b?.hourly?.time, b?.hourly?.temperature_2m)
+        let nbmMax = byTime(b?.daily?.time, b?.daily?.temperature_2m_max)
+        let nbmMin = byTime(b?.daily?.time, b?.daily?.temperature_2m_min)
+        let useNbm = !nbmHourly.isEmpty
+        let temp = w.hourly.time.enumerated().map { i, t in nbmHourly[t] ?? w.hourly.temperature_2m[i] }
+        let maxT = w.daily.time.enumerated().map { i, t in nbmMax[t] ?? w.daily.temperature_2m_max[i] }
+        let minT = w.daily.time.enumerated().map { i, t in nbmMin[t] ?? w.daily.temperature_2m_min[i] }
+
         return Forecast(
             fetchedAt: Date().timeIntervalSince1970.rounded(.down),
             tz: w.timezone,
-            hourly: .init(time: w.hourly.time, temp: w.hourly.temperature_2m, pop: w.hourly.precipitation_probability),
+            hourly: .init(time: w.hourly.time, temp: useNbm ? temp : w.hourly.temperature_2m, pop: w.hourly.precipitation_probability),
             daily: .init(time: w.daily.time, sunrise: w.daily.sunrise, sunset: w.daily.sunset,
-                         max: w.daily.temperature_2m_max, min: w.daily.temperature_2m_min),
+                         max: useNbm ? maxT : w.daily.temperature_2m_max, min: useNbm ? minT : w.daily.temperature_2m_min),
             tides: tides,
             tideDatum: datum,
             tideSource: tideSource,
-            swell: swell
+            swell: swell,
+            tempSource: useNbm ? "NOAA NBM" : "Open-Meteo"
         )
     }
 

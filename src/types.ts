@@ -49,6 +49,8 @@ export interface Forecast {
     max: (number | null)[];
     min: (number | null)[];
   };
+  /** Where the temperatures came from ("NOAA NBM" in the contiguous US). */
+  tempSource?: string;
   /** High/low tide turning points; null when the place is not near the coast. */
   tides: Tide[] | null;
   /** "MLLW" for NOAA station predictions, "MSL" for the Open-Meteo model. */
