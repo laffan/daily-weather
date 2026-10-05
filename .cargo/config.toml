@@ -1,0 +1,4 @@
+# Read by cargo whether it runs from the repo root or src-tauri/ (as
+# `tauri ios xcode-script` does). See the swift-rs patch in src-tauri/Cargo.toml.
+[env]
+SWIFT_RS_RUNTIME_ARCHIVE = "Tauri"

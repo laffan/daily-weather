@@ -112,6 +112,11 @@ target. Without it, Xcode fails with *Signing for "DailyWeatherWidget" requires 
 development team*. You can also run it on its own with `npm run ios:team`, for
 example before building from Xcode.
 
+**Xcode 27:** `swift-rs` 1.0.8, which Tauri uses, fails to link on Xcode 27
+([swift-rs#81](https://github.com/Brendonovich/swift-rs/issues/81)).
+`src-tauri/Cargo.toml` pins a fork with the fix, and `.cargo/config.toml` turns it
+on. Remove both once a fixed `swift-rs` is released.
+
 `src-tauri/gen/` is generated and git-ignored. If you change the identifier,
 the team, or `src-tauri/ios/project.yml`, delete `src-tauri/gen/apple` and run
 `npm run ios:init` again.
