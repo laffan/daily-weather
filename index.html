@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="color-scheme" content="light dark" />
+    <title>Daily Weather</title>
+  </head>
+  <body>
+    <header class="bar">
+      <h1>Daily Weather</h1>
+      <span id="status" aria-live="polite"></span>
+      <nav>
+        <button id="refresh" aria-label="Refresh now">↻</button>
+        <button id="units" aria-label="Switch units">°F</button>
+        <button id="edit">Edit</button>
+        <button data-action="add" aria-label="Add a place">+</button>
+      </nav>
+    </header>
+
+    <main id="list"></main>
+
+    <dialog id="add">
+      <form method="dialog" onsubmit="return false">
+        <div class="search">
+          <input id="q" type="search" placeholder="City or lat, lon" autocomplete="off" autocapitalize="words" spellcheck="false" />
+          <button id="close" type="button">Cancel</button>
+        </div>
+        <ul id="results"></ul>
+      </form>
+    </dialog>
+
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
