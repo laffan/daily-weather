@@ -21,7 +21,8 @@ native SwiftUI WidgetKit extension. All data sources are free and need no API ke
   (`36.97, -122.03`; this works offline). **Edit** shows ↑/↓ to reorder and a
   **Remove** button under each card (tap it twice to confirm).
 - **One card per place**: current temperature, today's high/low, and two
-  stacked 24-hour charts that share a time axis:
+  stacked charts covering today (local midnight to midnight, noon centred)
+  that share a time axis:
   1. **Weather**: a temperature line over hourly rain-chance bars.
   2. **Sea** (coastal places only): the tide curve with high and low tides
      marked and timed, with the rising tide lightly tinted, over hourly

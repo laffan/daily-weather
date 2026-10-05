@@ -178,11 +178,13 @@ enum WeatherAPI {
         async let model = try? get(OMMarine.self, marineURL, common.merging([
             "hourly": "sea_level_height_msl,swell_wave_height,swell_wave_period",
             "cell_selection": "sea",
+            "past_days": "1",
         ]) { $1 })
         async let gfsWave = try? get(OMMarine.self, marineURL, common.merging([
             "hourly": "swell_wave_height,swell_wave_period",
             "models": "ncep_gfswave025",
             "cell_selection": "sea",
+            "past_days": "1",
         ]) { $1 })
         async let noaa = noaaTides(loc.tideStation?.id)
 

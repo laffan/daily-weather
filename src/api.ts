@@ -117,12 +117,14 @@ export async function fetchForecast(loc: SavedLocation): Promise<Forecast> {
     getJson(`${MARINE_URL}?${q({
       hourly: "sea_level_height_msl,swell_wave_height,swell_wave_period",
       cell_selection: "sea",
+      past_days: "1", // the chart starts at midnight, before the first upcoming turn
     })}`).catch(() => null),
     // NOAA's GFS-Wave (WAVEWATCH III) swell forecast.
     getJson(`${MARINE_URL}?${q({
       hourly: "swell_wave_height,swell_wave_period",
       models: "ncep_gfswave025",
       cell_selection: "sea",
+      past_days: "1",
     })}`).catch(() => null),
     loc.tideStation ? fetchNoaaTides(loc.tideStation.id).catch(() => null) : Promise.resolve(null),
   ]);

@@ -86,16 +86,16 @@ function renderCard(loc: SavedLocation) {
     const chart = buildChart(f, win, state.units, width);
     holder.innerHTML = chart.svg;
     const out = $(".readout", card);
-    attachScrub($<SVGSVGElement>("svg", holder), chart, win, width, (i) => {
-      out.innerHTML = i == null ? "" : hourReadout(f, win, i);
-      out.classList.toggle("active", i != null);
+    attachScrub($<SVGSVGElement>("svg", holder), chart, f, win, width, (k) => {
+      out.innerHTML = k == null ? "" : hourReadout(f, win, k);
+      out.classList.toggle("active", k != null);
     });
   }
 }
 
 function currentConditions(f: Forecast, w: Window) {
   const t = nowSec();
-  const i = w.idx;
+  const i = w.nowIdx;
   const a = f.hourly.temp[i];
   const b = f.hourly.temp[i + 1];
   const frac = Math.min(1, Math.max(0, (t - f.hourly.time[i]) / 3600));
@@ -109,9 +109,8 @@ function hasSea(f: Forecast, w: Window): boolean {
   return tideAt(f.tides, w.start) != null || f.hourly.time.slice(w.idx, w.idx + 24).some((t) => swellAt(f, t));
 }
 
-/** The scrubbed hour: weather on the first line, tide and swell on the second. */
-function hourReadout(f: Forecast, w: Window, i: number): string {
-  const k = w.idx + i;
+/** The scrubbed hour (index into forecast.hourly): weather, then tide and swell. */
+function hourReadout(f: Forecast, w: Window, k: number): string {
   const sea = hasSea(f, w) ? seaAt(f, f.hourly.time[k]) : "";
   return `<p>${weatherAt(f, k)}</p>${sea ? `<p class="dim">${sea}</p>` : ""}`;
 }
@@ -119,10 +118,14 @@ function hourReadout(f: Forecast, w: Window, i: number): string {
 const dot = ` <span class="dim">·</span> `;
 
 function weatherSummary(f: Forecast, w: Window): string {
-  const pops = f.hourly.pop.slice(w.idx, w.idx + 24).map((p) => p ?? 0);
+  const pops = f.hourly.pop.slice(w.nowIdx, w.nowIdx + 24).map((p) => p ?? 0);
   const firstWet = pops.findIndex((p) => p >= 40);
   if (firstWet === 0) return `Rain likely now <span class="dim">· ${pops[0]}%</span>`;
-  if (firstWet > 0) return `Rain likely from ${fmt.hour(f.hourly.time[w.idx + firstWet], f.tz)} <span class="dim">· ${pops[firstWet]}%</span>`;
+  if (firstWet > 0) {
+    const t = f.hourly.time[w.nowIdx + firstWet];
+    const when = `${fmt.hour(t, f.tz)}${t >= w.start + 24 * 3600 ? " tomorrow" : ""}`; // past the chart's midnight
+    return `Rain likely from ${when} <span class="dim">· ${pops[firstWet]}%</span>`;
+  }
   const max = Math.max(...pops);
   return max >= 10 ? `Rain chance ≤ ${max}% next 24h` : "Dry next 24h";
 }
@@ -135,7 +138,7 @@ function seaSummary(f: Forecast, w: Window): string {
   const parts: string[] = [];
   const now = tideAt(f.tides, nowSec());
   if (now) parts.push(`Tide ${now.rising ? "rising" : "falling"}${now.mid ? ", mid" : ""}`);
-  const swell = f.hourly.time.slice(w.idx, w.idx + 24).map((t) => swellAt(f, t)).filter((s) => s != null);
+  const swell = f.hourly.time.slice(w.nowIdx, w.nowIdx + 24).map((t) => swellAt(f, t)).filter((s) => s != null);
   if (swell.length) {
     const hs = swell.map((s) => s.height);
     const lo = Math.min(...hs), hi = Math.max(...hs);

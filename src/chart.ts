@@ -32,17 +32,32 @@ const SWELL_BOTTOM = 104;
 const SWELL_TOP = SWELL_BOTTOM - SWELL_LINES * (SWELL_LINE + SWELL_GAP) + SWELL_GAP;
 
 export interface Window {
-  start: number; // unix seconds, top of the current hour
-  idx: number; // index into forecast.hourly of `start`
-  count: number; // hours available from idx (≤ HOURS + 1)
+  /** Unix seconds: 12 hours before today's local noon, so noon sits mid-chart. */
+  start: number;
+  /** Index into forecast.hourly of the first hour at or after `start`. */
+  idx: number;
+  /** Hours available from idx within the window (≤ HOURS + 1). */
+  count: number;
+  /** Index into forecast.hourly of the current hour. */
+  nowIdx: number;
 }
 
+/** Today's chart window (local to the place), or null if the saved forecast doesn't cover now. */
 export function forecastWindow(f: Forecast, nowSec = Date.now() / 1000): Window | null {
-  const start = Math.floor(nowSec / 3600) * 3600;
-  const idx = f.hourly.time.findIndex((t) => t >= start);
-  if (idx < 0) return null;
-  const count = Math.min(HOURS + 1, f.hourly.time.length - idx);
-  return count >= 2 ? { start: f.hourly.time[idx], idx, count } : null;
+  const hours = f.hourly.time;
+  const nowIdx = hours.findIndex((t) => t >= Math.floor(nowSec / 3600) * 3600);
+  if (nowIdx < 0) return null;
+
+  // Local noon today. Found by clock hour rather than midnight + 12 h so
+  // daylight-saving days still centre on noon.
+  const day = f.daily.time.findLast((d) => d <= nowSec) ?? f.daily.time[0];
+  const noon = hours.find((t) => t >= day && t < day + 26 * 3600 && fmt.hour24(t, f.tz) === "12") ?? day + 12 * 3600;
+  const start = noon - (HOURS / 2) * 3600;
+
+  const idx = hours.findIndex((t) => t >= start);
+  let count = 0;
+  while (idx + count < hours.length && hours[idx + count] <= start + HOURS * 3600) count++;
+  return count >= 2 ? { start, idx, count, nowIdx } : null;
 }
 
 // ---------------------------------------------------------------- tides
@@ -312,9 +327,9 @@ function smoothPath(pts: ([number, number] | null)[]): string {
 
 /**
  * Touch/drag across either chart to read exact values. `onReadout` receives
- * the hovered hour's index into the window, or null when the finger lifts.
+ * the hovered hour's index into forecast.hourly, or null when the finger lifts.
  */
-export function attachScrub(svg: SVGSVGElement, chart: Chart, w: Window, width: number, onReadout: (i: number | null) => void) {
+export function attachScrub(svg: SVGSVGElement, chart: Chart, f: Forecast, w: Window, width: number, onReadout: (k: number | null) => void) {
   const cursor = svg.querySelector<SVGGElement>(".cursor")!;
   const line = cursor.querySelector("line")!;
   const dotTemp = cursor.querySelector<SVGCircleElement>(".c-temp")!;
@@ -324,8 +339,11 @@ export function attachScrub(svg: SVGSVGElement, chart: Chart, w: Window, width: 
   const move = (ev: PointerEvent) => {
     const rect = svg.getBoundingClientRect();
     const px = ((ev.clientX - rect.left) / rect.width) * width;
-    const i = Math.max(0, Math.min(w.count - 1, Math.round((px - PAD_X) / step)));
-    const cx = String(PAD_X + i * step);
+    const slot = Math.max(0, Math.min(HOURS, Math.round((px - PAD_X) / step)));
+    const k = f.hourly.time.indexOf(w.start + slot * 3600);
+    if (k < 0) return; // no data for that hour (e.g. start of a daylight-saving day)
+    const i = k - w.idx;
+    const cx = String(PAD_X + slot * step);
     line.setAttribute("x1", cx);
     line.setAttribute("x2", cx);
     for (const [dot, ys] of [[dotTemp, chart.tempY], [dotTide, chart.tideY]] as const) {
@@ -333,7 +351,7 @@ export function attachScrub(svg: SVGSVGElement, chart: Chart, w: Window, width: 
       dot.setAttribute("cy", String(ys[i] ?? -20));
     }
     cursor.setAttribute("visibility", "visible");
-    onReadout(i);
+    onReadout(k);
   };
   const leave = () => {
     cursor.setAttribute("visibility", "hidden");
