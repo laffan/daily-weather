@@ -57,6 +57,8 @@ export interface Forecast {
   tideDatum?: "MLLW" | "MSL";
   /** Where the tides came from, for the attribution line. */
   tideSource?: string;
+  /** Why NOAA tides are missing for a place that has a station (shown under the charts). */
+  tideNote?: string;
   /** Hourly swell; null when the place is not near the coast. */
   swell?: {
     time: number[];

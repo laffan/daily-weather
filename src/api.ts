@@ -12,7 +12,6 @@ import type { Forecast, SavedLocation, Tide, TideStation } from "./types";
 const FORECAST_URL = "https://api.open-meteo.com/v1/forecast";
 const MARINE_URL = "https://marine-api.open-meteo.com/v1/marine";
 const GEOCODE_URL = "https://geocoding-api.open-meteo.com/v1/search";
-const NOAA_STATIONS_URL = "https://api.tidesandcurrents.noaa.gov/mdapi/prod/webapi/stations.json?type=tidepredictions";
 const NOAA_DATA_URL = "https://api.tidesandcurrents.noaa.gov/api/prod/datagetter";
 
 const FORECAST_DAYS = 7;
@@ -28,11 +27,14 @@ const MIN_TIDAL_RANGE_M = 0.1;
 // browser during development, the normal fetch is used.
 const httpFetch: typeof fetch = "__TAURI_INTERNALS__" in window ? tauriFetch : fetch.bind(window);
 
+// NOAA asks API clients to identify themselves (browsers ignore this header).
+const HEADERS = { "User-Agent": "DailyWeather/0.1 (personal weather app; tauri)" };
+
 async function getJson(url: string, timeoutMs = 15000): Promise<any> {
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), timeoutMs);
   try {
-    const res = await httpFetch(url, { signal: ctrl.signal, cache: "no-store" });
+    const res = await httpFetch(url, { signal: ctrl.signal, cache: "no-store", headers: HEADERS });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     return await res.json();
   } finally {
@@ -73,25 +75,26 @@ function parseCoordinates(q: string): { lat: number; lon: number } | null {
   return { lat, lon };
 }
 
-let stationList: Promise<{ id: string; name: string; lat: number; lon: number }[]> | null = null;
-
-/** Nearest NOAA tide-prediction station, or null if none is within range. */
+/**
+ * Nearest NOAA tide-prediction station, or null if none is within range.
+ * The station list ships with the app (src/noaa-tide-stations.json, rebuilt
+ * by scripts/update-tide-stations.mjs), so this needs no network and can't
+ * be confused by a failed or malformed download.
+ */
 export async function findTideStation(lat: number, lon: number): Promise<TideStation | null> {
-  stationList ??= getJson(NOAA_STATIONS_URL, 30000)
-    .then((d) =>
-      (d.stations ?? []).map((s: any) => ({ id: String(s.id), name: String(s.name), lat: Number(s.lat), lon: Number(s.lng) })),
-    )
-    .catch((e) => {
-      stationList = null; // retry next time
-      throw e;
-    });
+  const stations = (await import("./noaa-tide-stations.json")).default as unknown as [
+    id: string,
+    name: string,
+    lat: number,
+    lon: number,
+  ][];
   let best: TideStation | null = null;
   let bestKm = NOAA_STATION_MAX_KM;
-  for (const s of await stationList!) {
-    const km = distanceKm(lat, lon, s.lat, s.lon);
+  for (const [id, name, sLat, sLon] of stations) {
+    const km = distanceKm(lat, lon, sLat, sLon);
     if (km <= bestKm) {
       bestKm = km;
-      best = { id: s.id, name: s.name };
+      best = { id, name };
     }
   }
   return best;
@@ -109,6 +112,7 @@ export async function fetchForecast(loc: SavedLocation): Promise<Forecast> {
   };
   const q = (extra: Record<string, string>) => new URLSearchParams({ ...common, ...extra });
 
+  let noaaError: string | null = null;
   const [weather, nbm, model, gfsWave, noaa] = await Promise.all([
     getJson(`${FORECAST_URL}?${q({
       hourly: "temperature_2m,precipitation_probability",
@@ -136,7 +140,9 @@ export async function fetchForecast(loc: SavedLocation): Promise<Forecast> {
       cell_selection: "sea",
       past_days: "1",
     })}`).catch(() => null),
-    loc.tideStation ? fetchNoaaTides(loc.tideStation.id).catch(() => null) : Promise.resolve(null),
+    loc.tideStation
+      ? fetchNoaaTides(loc.tideStation.id).catch((e: unknown) => (noaaError = e instanceof Error ? e.message : String(e), null))
+      : Promise.resolve(null),
   ]);
 
   const f: Forecast = {
@@ -172,6 +178,11 @@ export async function fetchForecast(loc: SavedLocation): Promise<Forecast> {
       f.tideDatum = "MSL";
       f.tideSource = "Open-Meteo model";
     }
+  }
+  // Say why there are no NOAA tides when there should be, so it isn't silent.
+  if (loc.tideStation && !(noaa && noaa.length)) {
+    const why = noaaError ?? "no predictions returned";
+    f.tideNote = f.tides ? `NOAA ${loc.tideStation.name} unavailable (${why})` : `Tides unavailable: NOAA ${loc.tideStation.name} (${why})`;
   }
 
   const coastal = f.tides != null || near(model, COAST_MAX_KM);

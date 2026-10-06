@@ -12,7 +12,7 @@ native SwiftUI WidgetKit extension. All data sources are free and need no API ke
 |---|---|
 | Temperature (contiguous US) | NOAA [National Blend of Models](https://vlab.noaa.gov/web/mdl/nbm) (bias-corrected, 2.5 km) via Open-Meteo (`models=ncep_nbm_conus`) |
 | Temperature (elsewhere), rain chance, sunrise/sunset | [Open-Meteo forecast API](https://open-meteo.com/en/docs) default (`best_match`) |
-| Tides (US) | [NOAA CO-OPS](https://api.tidesandcurrents.noaa.gov/api/prod/) high/low predictions from the nearest station within 30 km |
+| Tides (US) | [NOAA CO-OPS](https://api.tidesandcurrents.noaa.gov/api/prod/) high/low predictions from the nearest station within 30 km. The station list is bundled (`src/noaa-tide-stations.json`, refreshed with `node scripts/update-tide-stations.mjs`), so finding the station needs no network. |
 | Tides (elsewhere) | Open-Meteo marine model (`sea_level_height_msl`); coarse, not for navigation |
 | Swell | NOAA GFS-Wave (WAVEWATCH III) via the [Open-Meteo marine API](https://open-meteo.com/en/docs/marine-weather-api) (`models=ncep_gfswave025`), falling back to Open-Meteo's default wave model |
 

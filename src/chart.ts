@@ -81,6 +81,12 @@ export function tideAt(tides: Tide[] | null | undefined, t: number): TideState |
   return { level: a.height + (b.height - a.height) * p, rising: b.height > a.height, mid: p >= 1 / 3 && p <= 2 / 3 };
 }
 
+/** True if the tide curve is known for any part of [start, end] (it needn't cover all of it). */
+export function hasTideCoverage(tides: Tide[] | null | undefined, start: number, end: number): boolean {
+  if (!tides || tides.length < 2) return false;
+  return tides.some((x, i) => i > 0 && x.time > start && tides[i - 1].time < end);
+}
+
 /** Swell reading for the hour starting at t. */
 export function swellAt(f: Forecast, t: number): { height: number; period: number | null } | null {
   const s = f.swell;
@@ -112,7 +118,7 @@ export function buildChart(f: Forecast, w: Window, units: Units, width: number, 
   const temps = f.hourly.temp.slice(w.idx, w.idx + w.count);
   const pops = f.hourly.pop.slice(w.idx, w.idx + w.count);
 
-  const hasTides = !!f.tides && tideAt(f.tides, w.start) != null;
+  const hasTides = hasTideCoverage(f.tides, w.start, end);
   const hasSwell = !!f.swell && times.some((t) => swellAt(f, t));
   const hasSea = hasTides || hasSwell;
   const seaTop = SEA_TOP + (hasTides ? 0 : -TIDE_FLOOR + 6);

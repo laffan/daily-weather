@@ -1,6 +1,6 @@
 import "./style.css";
 import { fetchForecast, findTideStation, searchPlaces, type PlaceResult } from "./api";
-import { attachScrub, buildChart, forecastWindow, swellAt, tideAt, type Window } from "./chart";
+import { attachScrub, buildChart, forecastWindow, hasTideCoverage, swellAt, tideAt, type Window } from "./chart";
 import * as fmt from "./format";
 import { loadState, saveState } from "./store";
 import type { AppState, Forecast, SavedLocation } from "./types";
@@ -106,7 +106,7 @@ function currentConditions(f: Forecast, w: Window) {
 }
 
 function hasSea(f: Forecast, w: Window): boolean {
-  return tideAt(f.tides, w.start) != null || f.hourly.time.slice(w.idx, w.idx + 24).some((t) => swellAt(f, t));
+  return hasTideCoverage(f.tides, w.start, w.start + 24 * 3600) || f.hourly.time.slice(w.idx, w.idx + 24).some((t) => swellAt(f, t));
 }
 
 /** The scrubbed hour (index into forecast.hourly): weather, then tide and swell. */
@@ -190,6 +190,7 @@ function summary(f: Forecast, w: Window): string {
     f.tempSource && `Temperature: ${f.tempSource}`,
     f.tideSource && `Tides: ${f.tideSource}`,
     f.swell?.source && `Swell: ${f.swell.source}`,
+    f.tideNote,
   ].filter(Boolean);
   return `<div class="summary">${lines.map((l) => `<p>${l}</p>`).join("")}</div>${
     sources.length
@@ -214,10 +215,9 @@ async function refresh(loc: SavedLocation) {
   renderCard(loc);
   renderStatus();
   try {
-    if (loc.tideStation === undefined) {
-      // Looked up once per place; a failure leaves it undefined to retry next time.
-      loc.tideStation = await findTideStation(loc.lat, loc.lon).catch(() => undefined);
-    }
+    // Local lookup in the bundled station list; also corrects places saved
+    // as "no station" by the old network lookup.
+    loc.tideStation = await findTideStation(loc.lat, loc.lon);
     const f = await fetchForecast(loc);
     // The location may have been removed while we were waiting.
     if (state.locations.some((l) => l.id === loc.id)) {
